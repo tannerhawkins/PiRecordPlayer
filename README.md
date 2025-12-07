@@ -15,7 +15,7 @@ Perfect for creating a retro-futuristic record player experience or a modern juk
 
 1. **Clone the repository:**
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/tannerhawkins/PiRecordPlayer
    cd recordPlayer
    ```
 
