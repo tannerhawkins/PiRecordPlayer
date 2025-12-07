@@ -101,19 +101,6 @@ Comprehensive guides are available in the `docs/` folder:
   - `mfrc522` + `RPi.GPIO` (for MFRC522 readers)
   - `nfcpy` (for PN532 readers)
 
-## 🎯 Features
-
-### NFC Support
-- ✅ **Multiple reader types** - Supports MFRC522 and PN532 readers
-- ✅ **Auto-detection** - Automatically tries available NFC libraries
-- ✅ **Robust error handling** - Gracefully handles read/write errors
-
-### Playback Control
-- ✅ **Device selection** - Auto-detect or manually configure Spotify device
-- ✅ **Album playback** - Full album playback with metadata display
-- ✅ **Continuous operation** - Service mode for multiple scans
-- ✅ **Debouncing** - Prevents duplicate scans
-
 ## 🛠️ Setup Guide
 
 ### 1. Create Spotify Developer App
