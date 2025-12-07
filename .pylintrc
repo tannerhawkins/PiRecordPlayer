@@ -1,0 +1,49 @@
+[MASTER]
+# Use multiple processes to speed up Pylint
+jobs=0
+
+[MESSAGES CONTROL]
+# Disable warnings for intentional design decisions:
+# - import-outside-toplevel: NFC libraries are conditionally imported
+#   because they're optional hardware dependencies
+# - broad-exception-caught: Necessary for hardware library error handling
+# - too-many-statements, too-many-branches, too-many-locals: Acceptable
+#   for main() functions that orchestrate multiple steps
+# - duplicate-code: Similar patterns across scripts are acceptable
+# - too-many-return-statements: Acceptable for validation functions
+
+disable=
+    import-outside-toplevel,
+    broad-exception-caught,
+    too-many-statements,
+    too-many-branches,
+    too-many-locals,
+    duplicate-code,
+    too-many-return-statements,
+    try-except-raise,
+    consider-using-from-import
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=100
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=8
+# Maximum number of attributes for a class
+max-attributes=10
+# Maximum number of boolean expressions in an if statement
+max-bool-expr=5
+# Maximum number of branch for function / method body
+max-branches=15
+# Maximum number of locals for function / method body
+max-locals=20
+# Maximum number of parents for a class
+max-parents=7
+# Maximum number of public methods for a class
+max-public-methods=20
+# Maximum number of return / yield for function / method body
+max-returns=7
+# Maximum number of statements in function / method body
+max-statements=60
+
