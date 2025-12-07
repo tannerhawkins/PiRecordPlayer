@@ -1,0 +1,8 @@
+requests>=2.31.0
+
+# NFC libraries (install based on your NFC reader type):
+# For MFRC522 reader (common on Raspberry Pi):
+#   pip install mfrc522 RPi.GPIO
+# For PN532 reader:
+#   pip install nfcpy
+

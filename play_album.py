@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""
+NFC Album Player for Spotify
+Reads album URI from NFC tag and plays it on Spotify.
+"""
+
+import requests
+import os
+import sys
+
+# Import shared authentication and API functions
+from spotify_auth import (
+    CLIENT_ID, CLIENT_SECRET, DEVICE_ID, SPOTIFY_API_BASE,
+    REDIRECT_URI,
+    get_valid_access_token, get_auth_code, get_access_token,
+    get_available_devices, transfer_playback
+)
+
+
+def play_album(access_token, device_id, album_uri):
+    """Start playback of an album on the specified device."""
+    url = f"{SPOTIFY_API_BASE}/me/player/play?device_id={device_id}"
+    
+    payload = {"context_uri": album_uri}
+    
+    response = requests.put(
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        },
+        json=payload
+    )
+    
+    if response.status_code == 204:
+        return True
+    else:
+        print(f"ERROR: Failed to start playback (Status: {response.status_code})")
+        if response.text:
+            print(f"Response: {response.text}")
+        return False
+
+
+def get_album_info(access_token, album_uri):
+    """Get album information from Spotify."""
+    # Extract album ID from URI (format: spotify:album:ID)
+    if "spotify:album:" in album_uri:
+        album_id = album_uri.split("spotify:album:")[-1]
+    else:
+        album_id = album_uri
+    
+    response = requests.get(
+        f"{SPOTIFY_API_BASE}/albums/{album_id}",
+        headers={"Authorization": f"Bearer {access_token}"}
+    )
+    
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return None
+
+
+def read_from_nfc_tag_mfrc522():
+    """
+    Read text data from an NFC tag using MFRC522 reader.
+    Returns the text content or None if failed.
+    """
+    try:
+        from mfrc522 import SimpleMFRC522
+        import RPi.GPIO as GPIO
+    except ImportError:
+        return None, "MFRC522 library not found"
+    
+    try:
+        reader = SimpleMFRC522()
+        
+        print("📱 Waiting for NFC tag...")
+        print("    (Place tag on reader... Press Ctrl+C to cancel)")
+        
+        id, text = reader.read()
+        GPIO.cleanup()
+        
+        # Clean up the text (remove trailing nulls/whitespace)
+        text = text.strip().rstrip('\x00')
+        
+        return text, None
+        
+    except KeyboardInterrupt:
+        GPIO.cleanup()
+        return None, "Cancelled by user"
+    except Exception as e:
+        try:
+            GPIO.cleanup()
+        except:
+            pass
+        return None, f"Error reading tag: {str(e)}"
+
+
+def read_from_nfc_tag_ndef():
+    """
+    Read text data from an NFC tag using nfcpy library (PN532).
+    Returns the text content or None if failed.
+    """
+    try:
+        import nfc
+        from nfc.ndef import TextRecord
+    except ImportError:
+        return None, "nfcpy library not found"
+    
+    text_content = [None]  # Use list to modify from nested function
+    
+    try:
+        clf = nfc.ContactlessFrontend()
+        
+        if clf is None:
+            return None, "No NFC reader found"
+        
+        print("📱 Waiting for NFC tag...")
+        print("    (Place tag on reader... Waiting up to 30 seconds)")
+        
+        def on_connect(tag):
+            try:
+                if tag.ndef:
+                    message = tag.ndef.message
+                    for record in message:
+                        if isinstance(record, TextRecord):
+                            text_content[0] = record.text
+                            return True
+                        elif hasattr(record, 'text'):
+                            text_content[0] = record.text
+                            return True
+            except Exception as e:
+                print(f"Error reading NDEF: {e}")
+            return False
+        
+        # Connect and read
+        tag = clf.connect(rdwr={'on-connect': on_connect}, terminate=lambda: False)
+        clf.close()
+        
+        if text_content[0]:
+            return text_content[0], None
+        
+        return None, "No text found on tag"
+        
+    except Exception as e:
+        return None, f"Error: {str(e)}"
+
+
+def read_from_nfc_tag():
+    """
+    Read album URI from NFC tag using available reader.
+    Returns tuple: (album_uri, error_message)
+    """
+    # Try MFRC522 first (most common)
+    text, error = read_from_nfc_tag_mfrc522()
+    
+    if text is None and error and "not found" not in error.lower():
+        # MFRC522 failed for a different reason, return error
+        return None, error
+    
+    if text:
+        return text, None
+    
+    # Try nfcpy (PN532)
+    text, error = read_from_nfc_tag_ndef()
+    
+    if text:
+        return text, None
+    
+    # Neither worked
+    if "not found" in error.lower() if error else True:
+        return None, "No NFC reader libraries found. Install mfrc522 or nfcpy."
+    
+    return None, error or "Failed to read from NFC tag"
+
+
+def validate_album_uri(uri):
+    """Validate that the URI looks like a Spotify album URI."""
+    if not uri:
+        return False
+    
+    uri = uri.strip()
+    
+    # Check for spotify:album: format
+    if uri.startswith("spotify:album:"):
+        album_id = uri.split("spotify:album:")[-1]
+        if len(album_id) > 0:
+            return True
+    
+    # Check for https://open.spotify.com/album/ format
+    if "open.spotify.com/album/" in uri:
+        return True
+    
+    return False
+
+
+def normalize_album_uri(uri):
+    """Convert various URI formats to spotify:album: format."""
+    uri = uri.strip()
+    
+    # Already in correct format
+    if uri.startswith("spotify:album:"):
+        return uri
+    
+    # Convert from URL format
+    if "open.spotify.com/album/" in uri:
+        album_id = uri.split("/album/")[-1].split("?")[0].split("/")[0]
+        return f"spotify:album:{album_id}"
+    
+    # If it's just an ID, assume it's an album ID
+    if ":" not in uri and "http" not in uri:
+        return f"spotify:album:{uri}"
+    
+    return uri
+
+
+def main():
+    print("=" * 60)
+    print("Spotify Album Player - NFC Tag Reader")
+    print("=" * 60)
+    
+    # Check credentials and authenticate
+    if CLIENT_ID == "YOUR_CLIENT_ID" or CLIENT_SECRET == "YOUR_CLIENT_SECRET":
+        print("\n⚠ WARNING: CLIENT_ID and CLIENT_SECRET not found!")
+        print("Please set them as environment variables:")
+        print("  export SPOTIFY_CLIENT_ID=\"your_client_id\"")
+        print("  export SPOTIFY_CLIENT_SECRET=\"your_client_secret\"")
+        sys.exit(1)
+    
+    # Authenticate with Spotify (requires playback scopes)
+    print("\n[1/4] Authenticating with Spotify...")
+    required_scope = "user-modify-playback-state user-read-playback-state"
+    access_token = get_valid_access_token(required_scope=required_scope)
+    
+    if not access_token:
+        print("No valid tokens found or token missing required scopes. Starting authorization...")
+        auth_code = get_auth_code(CLIENT_ID, REDIRECT_URI, scope=required_scope)
+        access_token, refresh_token = get_access_token(CLIENT_ID, CLIENT_SECRET, auth_code, REDIRECT_URI)
+        
+        if not access_token:
+            print("Failed to get access token. Exiting.")
+            sys.exit(1)
+    
+    print("✓ Authenticated successfully")
+    
+    # Read from NFC tag
+    print("\n[2/4] Reading from NFC tag...")
+    album_uri_raw, error = read_from_nfc_tag()
+    
+    if not album_uri_raw:
+        print(f"\n❌ ERROR: {error}")
+        print("\nTroubleshooting:")
+        print("  - Make sure your NFC reader is connected")
+        print("  - Install appropriate library: pip install mfrc522 RPi.GPIO")
+        print("  - Or install: pip install nfcpy")
+        print("  - Make sure the tag contains a valid Spotify album URI")
+        sys.exit(1)
+    
+    print(f"✓ Read from tag: {album_uri_raw}")
+    
+    # Validate and normalize URI
+    print("\n[3/4] Validating album URI...")
+    album_uri = normalize_album_uri(album_uri_raw)
+    
+    if not validate_album_uri(album_uri):
+        print(f"❌ ERROR: Invalid album URI format: {album_uri_raw}")
+        print("Expected format: spotify:album:ALBUM_ID")
+        sys.exit(1)
+    
+    print(f"✓ Album URI: {album_uri}")
+    
+    # Get album info (optional, for display)
+    album_info = get_album_info(access_token, album_uri)
+    if album_info:
+        artist_names = ", ".join([artist["name"] for artist in album_info["artists"]])
+        print(f"✓ Album: {album_info['name']} by {artist_names}")
+    
+    # Get device ID
+    print("\n[4/4] Getting Spotify device...")
+    devices = get_available_devices(access_token)
+    
+    if not devices:
+        print("❌ ERROR: No Spotify devices available")
+        print("Make sure Spotify is open on at least one device")
+        sys.exit(1)
+    
+    # Use configured device ID or first available
+    device_id = DEVICE_ID if DEVICE_ID != "YOUR_DEVICE_ID" else None
+    if not device_id and devices:
+        device_id = devices[0]["id"]
+        print(f"✓ Using device: {devices[0]['name']}")
+    elif device_id:
+        # Verify device is available
+        device_found = False
+        for device in devices:
+            if device["id"] == device_id:
+                print(f"✓ Using configured device: {device['name']}")
+                device_found = True
+                break
+        
+        if not device_found:
+            print(f"⚠ Warning: Configured device ID not found")
+            print(f"Available devices:")
+            for device in devices:
+                print(f"  - {device['name']} (ID: {device['id']})")
+            device_id = devices[0]["id"]
+            print(f"Using: {devices[0]['name']} instead")
+    
+    if not device_id:
+        print("❌ ERROR: No device ID available")
+        sys.exit(1)
+    
+    # Transfer playback and play album
+    print("\n🎵 Starting playback...")
+    
+    if transfer_playback(access_token, device_id):
+        print("✓ Transferred playback to device")
+    
+    if play_album(access_token, device_id, album_uri):
+        print("✓ Playing album!")
+        print("\n" + "=" * 60)
+        print("SUCCESS! Album is now playing.")
+        print("=" * 60)
+    else:
+        print("❌ Failed to start playback")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\nCancelled by user.")
+        sys.exit(0)
+
