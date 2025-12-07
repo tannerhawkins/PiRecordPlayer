@@ -103,12 +103,6 @@ Comprehensive guides are available in the `docs/` folder:
 
 ## 🎯 Features
 
-### Authentication
-- ✅ **Automatic token management** - Tokens saved and automatically refreshed
-- ✅ **One-time authorization** - Authorize once, use forever (until tokens are revoked)
-- ✅ **Shared authentication** - All scripts use the same token file
-- ✅ **Manual authorization flow** - Works on headless systems
-
 ### NFC Support
 - ✅ **Multiple reader types** - Supports MFRC522 and PN532 readers
 - ✅ **Auto-detection** - Automatically tries available NFC libraries
