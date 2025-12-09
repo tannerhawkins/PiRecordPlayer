@@ -16,6 +16,8 @@ from spotify_auth import (
     get_available_devices, transfer_playback
 )
 
+from read_nfc_ndef import read_from_nfc_tag_ndef
+from read_nfc_mfrc522 import read_from_nfc_tag_mfrc522
 
 def play_album(access_token, device_id, album_uri):
     """Start playback of an album on the specified device."""
@@ -60,92 +62,6 @@ def get_album_info(access_token, album_uri):
         return response.json()
 
     return None
-
-
-def read_from_nfc_tag_mfrc522():
-    """
-    Read text data from an NFC tag using MFRC522 reader.
-    Returns the text content or None if failed.
-    """
-    try:
-        from mfrc522 import SimpleMFRC522
-        from RPi import GPIO
-    except ImportError:
-        return None, "MFRC522 library not found"
-
-    try:
-        reader = SimpleMFRC522()
-
-        print("📱 Waiting for NFC tag...")
-        print("    (Place tag on reader... Press Ctrl+C to cancel)")
-
-        _, text = reader.read()
-        GPIO.cleanup()
-
-        # Clean up the text (remove trailing nulls/whitespace)
-        text = text.strip().rstrip('\x00')
-
-        return text, None
-
-    except KeyboardInterrupt:
-        GPIO.cleanup()
-        return None, "Cancelled by user"
-    except Exception as e:
-        try:
-            GPIO.cleanup()
-        except Exception:
-            pass
-        return None, f"Error reading tag: {str(e)}"
-
-
-def read_from_nfc_tag_ndef():
-    """
-    Read text data from an NFC tag using nfcpy library (PN532).
-    Returns the text content or None if failed.
-    """
-    try:
-        import nfc
-        from nfc.ndef import TextRecord
-    except ImportError:
-        return None, "nfcpy library not found"
-
-    text_content = [None]  # Use list to modify from nested function
-
-    try:
-        clf = nfc.ContactlessFrontend()
-
-        if clf is None:
-            return None, "No NFC reader found"
-
-        print("📱 Waiting for NFC tag...")
-        print("    (Place tag on reader... Waiting up to 30 seconds)")
-
-        def on_connect(tag):
-            try:
-                if tag.ndef:
-                    message = tag.ndef.message
-                    for record in message:
-                        if isinstance(record, TextRecord):
-                            text_content[0] = record.text
-                            return True
-                        if hasattr(record, 'text'):
-                            text_content[0] = record.text
-                            return True
-            except Exception as e:
-                print(f"Error reading NDEF: {e}")
-            return False
-
-        # Connect and read
-        clf.connect(rdwr={'on-connect': on_connect}, terminate=lambda: False)
-        clf.close()
-
-        if text_content[0]:
-            return text_content[0], None
-
-        return None, "No text found on tag"
-
-    except Exception as e:
-        return None, f"Error: {str(e)}"
 
 
 def read_from_nfc_tag():
